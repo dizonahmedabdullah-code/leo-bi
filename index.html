@@ -179,9 +179,9 @@
     <div class="date-presets" id="datePresets">
       <button class="date-preset" data-days="7">7D</button>
       <button class="date-preset" data-days="30">30D</button>
-      <button class="date-preset active" data-days="90">90D</button>
+      <button class="date-preset" data-days="90">90D</button>
       <button class="date-preset" data-days="180">6M</button>
-      <button class="date-preset" data-days="0">All</button>
+      <button class="date-preset active" data-days="0">All</button>
     </div>
     <span class="slicer-label" style="margin-left:6px">Slice</span>
     <div id="slicerContainer" style="display:flex; gap:10px; flex-wrap:wrap;"></div>
@@ -272,7 +272,7 @@
    When false, the dashboard runs on generated demo data so it previews
    instantly the moment it's dropped on Netlify/Vercel.
 ==================================================================== */
-const USE_LIVE = true;            // <-- single switch: demo  ->  live
+const USE_LIVE = false;            // <-- single switch: demo  ->  live
 const API_ENDPOINT = '/api/ghl';   // serverless proxy that holds the token
 
 const PACKAGES = [
@@ -351,14 +351,14 @@ async function loadData(){
    FILTER STATE  (the "slicers")
 ==================================================================== */
 const SLICER_DEFS = [
-  { key:'package',     label:'Package',    values:()=>PACKAGES.map(p=>p.name) },
-  { key:'occupation',  label:'Occupation', values:()=>OCCUPATIONS },
-  { key:'assignee',    label:'Closer',     values:()=>ASSIGNEES },
-  { key:'paymentType', label:'Payment',    values:()=>PAYTYPES },
-  { key:'visa',        label:'Visa',       values:()=>VISA },
+  { key:'package',     label:'Package',    values:()=>CATS.package },
+  { key:'occupation',  label:'Occupation', values:()=>CATS.occupation },
+  { key:'assignee',    label:'Closer',     values:()=>CATS.assignee },
+  { key:'paymentType', label:'Payment',    values:()=>CATS.paymentType },
+  { key:'visa',        label:'Visa',       values:()=>CATS.visa },
   { key:'status',      label:'Status',     values:()=>['won','open','lost'] },
 ];
-const filters = { dateDays:90, package:new Set(), occupation:new Set(), assignee:new Set(), paymentType:new Set(), visa:new Set(), status:new Set() };
+const filters = { dateDays:0, package:new Set(), occupation:new Set(), assignee:new Set(), paymentType:new Set(), visa:new Set(), status:new Set() };
 let metric = 'revenue';
 let trendGran = 'week';
 
@@ -378,6 +378,17 @@ function getFiltered(){
 const fmt = n => n.toLocaleString('en-AU',{maximumFractionDigits:0});
 const fmtMoney = n => '$'+n.toLocaleString('en-AU',{maximumFractionDigits:0});
 const measure = r => metric==='revenue' ? r.value : 1;
+
+/* ---- dynamic categories: read straight from the live (or demo) data ---- */
+const PKG_COLORS = { Silver:'#9AA7B8', Gold:'#FFB800', Diamond:'#4D9FFF' };
+const PALETTE = ['#00D97E','#4D9FFF','#FFB800','#A77BFF','#FF4D4D','#9AA7B8','#00B8D4','#FF8A4D','#6EE7A8','#C77BFF'];
+let CATS = { package:[], occupation:[], assignee:[], paymentType:[], visa:[] };
+function deriveCats(){
+  const uniq = k => [...new Set((DATA.rows||[]).map(r=>r[k]).filter(v=>v!=null && v!==''))].sort();
+  CATS.package = uniq('package'); CATS.occupation = uniq('occupation');
+  CATS.assignee = uniq('assignee'); CATS.paymentType = uniq('paymentType'); CATS.visa = uniq('visa');
+}
+const colorFor = (label,i)=> PKG_COLORS[label] || PALETTE[i % PALETTE.length];
 
 /* ====================================================================
    RENDER: SLICER UI
@@ -488,17 +499,17 @@ function renderTrend(){
 function renderPackage(){
   destroy('package'); const f=getFiltered().filter(r=>r.status==='won');
   const agg={}; f.forEach(r=>agg[r.package]=(agg[r.package]||0)+measure(r));
-  const labels=PACKAGES.map(p=>p.name).filter(l=>agg[l]);
+  const labels=CATS.package.filter(l=>agg[l]);
   charts.package=new Chart(document.getElementById('packageChart'),{ type:'doughnut',
-    data:{ labels, datasets:[{ data:labels.map(l=>agg[l]), backgroundColor:labels.map(l=>PACKAGES.find(p=>p.name===l).color), borderColor:'#141925', borderWidth:3, hoverOffset:6 }]},
+    data:{ labels, datasets:[{ data:labels.map(l=>agg[l]), backgroundColor:labels.map((l,i)=>colorFor(l,i)), borderColor:'#141925', borderWidth:3, hoverOffset:6 }]},
     options:{ responsive:true, maintainAspectRatio:false, cutout:'62%', plugins:{ legend:{position:'bottom'}, tooltip:{ callbacks:{ label:c=>` ${c.label}: ${metric==='revenue'?fmtMoney(c.parsed):c.parsed+' deals'}` }}},
       onClick:(e,el)=>{ if(el.length){ toggleFilter('package',labels[el[0].index]); } } } });
 }
 
 function renderOcc(){
   destroy('occ'); const f=getFiltered().filter(r=>r.status==='won');
-  const agg={}; OCCUPATIONS.forEach(o=>agg[o]=0); f.forEach(r=>agg[r.occupation]+=measure(r));
-  const sorted=Object.entries(agg).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
+  const agg={}; f.forEach(r=>{ agg[r.occupation]=(agg[r.occupation]||0)+measure(r); });
+  const sorted=Object.entries(agg).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]).slice(0,12);
   charts.occ=new Chart(document.getElementById('occChart'),{ type:'bar',
     data:{ labels:sorted.map(s=>s[0]), datasets:[{ data:sorted.map(s=>s[1]), backgroundColor:'#4D9FFF', borderRadius:6, barThickness:18 }]},
     options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label:c=> metric==='revenue'?fmtMoney(c.parsed.x):c.parsed.x+' deals' }}},
@@ -508,34 +519,36 @@ function renderOcc(){
 
 function renderAssignee(){
   destroy('assignee'); const f=getFiltered();
-  const ds=ASSIGNEES.map((a,i)=>{
+  const names=CATS.assignee;
+  const ds=names.map(a=>{
     const won=f.filter(r=>r.assignee===a&&r.status==='won');
     const open=f.filter(r=>r.assignee===a&&r.status==='open');
     return { a, won: metric==='revenue'?won.reduce((s,r)=>s+r.value,0):won.length, open: open.length };
   });
   charts.assignee=new Chart(document.getElementById('assigneeChart'),{ type:'bar',
-    data:{ labels:ASSIGNEES, datasets:[
+    data:{ labels:names, datasets:[
       { label:'Won', data:ds.map(d=>d.won), backgroundColor:'#00D97E', borderRadius:6, barThickness:34 },
       { label:'Open pipeline', data:ds.map(d=>d.open), backgroundColor:'rgba(245,243,237,0.18)', borderRadius:6, barThickness:34 },
     ]},
     options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{position:'bottom'}, tooltip:{ callbacks:{ label:c=> c.datasetIndex===0&&metric==='revenue'?` Won: ${fmtMoney(c.parsed.y)}`:` ${c.dataset.label}: ${c.parsed.y}` }}},
       scales:{ x:{ grid:{display:false} }, y:{ grid:{color:GRID} } },
-      onClick:(e,el)=>{ if(el.length){ toggleFilter('assignee',ASSIGNEES[el[0].index]); } } } });
+      onClick:(e,el)=>{ if(el.length){ toggleFilter('assignee',names[el[0].index]); } } } });
 }
 
 function renderPay(){
   destroy('pay'); const f=getFiltered().filter(r=>r.status==='won');
+  const types=CATS.paymentType;
   const booked={}, collected={};
-  PAYTYPES.forEach(p=>{ booked[p]=0; collected[p]=0; });
-  f.forEach(r=>{ booked[r.paymentType]+=r.value; collected[r.paymentType]+=r.collected; });
+  types.forEach(p=>{ booked[p]=0; collected[p]=0; });
+  f.forEach(r=>{ if(booked[r.paymentType]==null){booked[r.paymentType]=0;collected[r.paymentType]=0;} booked[r.paymentType]+=r.value; collected[r.paymentType]+=r.collected; });
   charts.pay=new Chart(document.getElementById('payChart'),{ type:'bar',
-    data:{ labels:PAYTYPES, datasets:[
-      { label:'Booked', data:PAYTYPES.map(p=>booked[p]), backgroundColor:'rgba(77,159,255,0.35)', borderRadius:6, barThickness:34 },
-      { label:'Collected', data:PAYTYPES.map(p=>collected[p]), backgroundColor:'#00D97E', borderRadius:6, barThickness:34 },
+    data:{ labels:types, datasets:[
+      { label:'Booked', data:types.map(p=>booked[p]), backgroundColor:'rgba(77,159,255,0.35)', borderRadius:6, barThickness:34 },
+      { label:'Collected', data:types.map(p=>collected[p]), backgroundColor:'#00D97E', borderRadius:6, barThickness:34 },
     ]},
     options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{position:'bottom'}, tooltip:{ callbacks:{ label:c=>` ${c.dataset.label}: ${fmtMoney(c.parsed.y)}` }}},
       scales:{ x:{ grid:{display:false} }, y:{ grid:{color:GRID}, ticks:{ callback:v=>'$'+(v/1000)+'k' } } },
-      onClick:(e,el)=>{ if(el.length){ toggleFilter('paymentType',PAYTYPES[el[0].index]); } } } });
+      onClick:(e,el)=>{ if(el.length){ toggleFilter('paymentType',types[el[0].index]); } } } });
 }
 
 function renderCycle(){
@@ -550,8 +563,8 @@ function renderCycle(){
 
 function renderVisa(){
   destroy('visa'); const f=getFiltered();
-  const agg={}; VISA.forEach(v=>agg[v]=0); f.forEach(r=>agg[r.visa]++);
-  const labels=VISA.filter(v=>agg[v]);
+  const agg={}; f.forEach(r=>{ agg[r.visa]=(agg[r.visa]||0)+1; });
+  const labels=CATS.visa.filter(v=>agg[v]);
   const cols=['#00D97E','#4D9FFF','#FFB800','#A77BFF','#FF4D4D','#9AA7B8'];
   charts.visa=new Chart(document.getElementById('visaChart'),{ type:'polarArea',
     data:{ labels, datasets:[{ data:labels.map(l=>agg[l]), backgroundColor:labels.map((l,i)=>cols[i%cols.length]+'cc'), borderColor:'#141925', borderWidth:2 }]},
@@ -626,14 +639,14 @@ document.querySelectorAll('#trendGran .tool').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#trendGran .tool').forEach(x=>x.classList.remove('active')); b.classList.add('active');
   trendGran=b.dataset.g; renderTrend();
 });
-document.getElementById('refreshBtn').onclick=async()=>{ await loadData(); renderAll(); buildSlicers(); };
+document.getElementById('refreshBtn').onclick=async()=>{ await loadData(); deriveCats(); renderAll(); buildSlicers(); };
 
 // clock
 function tick(){ document.getElementById('clock').textContent=new Date().toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit',hour12:true})+' AEST'; }
 tick(); setInterval(tick,30000);
 
 // boot
-(async function(){ await loadData(); buildSlicers(); renderAll(); })();
+(async function(){ await loadData(); deriveCats(); buildSlicers(); renderAll(); })();
 </script>
 </body>
 </html>
