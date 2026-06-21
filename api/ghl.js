@@ -1,102 +1,110 @@
 /* =====================================================================
-   /api/ghl.js  —  GHL → Dashboard proxy  (Vercel serverless function)
+   /api/ghl.js  —  GHL (Contacts) → Dashboard proxy  (Vercel function)
    ---------------------------------------------------------------------
-   WHY THIS FILE EXISTS
-   The Private Integration Token (PIT) must NEVER be sent to the browser.
-   This function runs server-side on Vercel, holds the token in an
-   environment variable, calls GHL v2, and returns a clean flat table.
+   WHY CONTACTS, NOT OPPORTUNITIES
+   In Leo's build, every reporting field (Package, Occupation, Payment,
+   Visa, Enrolled Date, Package Value, Money Paid) lives at the CONTACT
+   level. GHL's API also doesn't reliably return opportunity custom
+   fields. So the dashboard reads from Contacts — the source of truth.
 
-   THE 401 "Invalid JWT" FIX
-   GHL v2 rejects any request missing the Version header. All three
-   headers below are mandatory together:
-     Authorization: Bearer <PIT>
-     Version: 2021-07-28
-     Accept: application/json
+   THIS VERSION pulls ONLY enrolled customers (Contact Type = customer),
+   which keeps the request small and fast on an 8,000+ contact account.
+   That lights up the money core accurately: Revenue, Cash Collected,
+   Packages, Occupation, Payment Type, Visa, Sales Cycle.
 
-   ENVIRONMENT VARIABLES (set in Vercel → Project → Settings → Env Vars)
-     GHL_PIT          = your Private Integration Token
-     GHL_LOCATION_ID  = the sub-account location ID
-   (Then redeploy. Never commit these into the repo.)
+   Conversion / Funnel / Active Pipeline need the full LEADS set too —
+   that's the next pass (handled separately to respect the time limit).
 
-   CUSTOM FIELD MAPPING
-   Occupation / Package / Payment Type / Visa / Enrolled Date live as
-   custom fields on the opportunity or contact. Their IDs are unique to
-   Leo's build. Paste the real IDs into CF below — get them once via:
-     GET https://services.leadconnectorhq.com/locations/{locationId}/customFields
+   ENV VARS (already set in Vercel): GHL_PIT, GHL_LOCATION_ID
 ===================================================================== */
 
 const GHL_BASE = 'https://services.leadconnectorhq.com';
-const HEADERS = () => ({
+const H = () => ({
   Authorization: `Bearer ${process.env.GHL_PIT}`,
   Version: '2021-07-28',
   Accept: 'application/json',
+  'Content-Type': 'application/json',
 });
 
-// ---- paste the real custom-field IDs from Leo's GHL location here ----
+/* ---- Leo's REAL Contact-level custom field IDs ---- */
 const CF = {
-  occupation:  yJ0uzdgON7RsoQyusUPz,
-  package:     eckVE6EuidBwXM8LhmVd,
-  paymentType: 3Rv02bGP9JeblbZffgU2,
-  visa:        bmNyZj5azN83VUGWQwS5,
-  enrolledDate:zeMCO26qq8GjBUfpF2vt,
-  collected:   'REPLACE_amount_collected_field_id', // optional
+  occupation:   'yJ0uzdgON7RsoQyusUPz',
+  package:      'eckVE6EuidBwXM8LhmVd',
+  paymentType:  '3Rv02bGP9JeblbZffgU2',
+  visa:         'bmNyZj5azN83VUGWQwS5',
+  enrolledDate: 'zeMCO26qq8GjBUfpF2vt',
+  packageValue: 'Sxxw4o4NU1GRwaK0D89R', // full package price  = booked revenue
+  moneyPaid:    '2hiSUXz7RAQ7USdyb4Eb', // received so far      = cash collected
 };
 
-// pull a custom field value out of an opportunity's customFields array
-function cf(opp, id) {
-  if (!opp.customFields) return null;
-  const hit = opp.customFields.find(f => f.id === id);
-  return hit ? (hit.fieldValue ?? hit.value ?? null) : null;
-}
+// Only used as a fallback if Package Value is empty on a record.
+// Fill in real Gold/Diamond prices if you ever want that fallback to be exact.
+const PRICE = { Silver: 1996.50, Gold: 0, Diamond: 0 };
 
-// simple in-memory cache to respect the 100-req / 10s burst limit
-let CACHE = { at: 0, payload: null };
-const TTL = 5 * 60 * 1000; // 5 minutes
+const cfv = (c, id) => {
+  const arr = c.customFields || c.customField || [];
+  const h = arr.find(f => f.id === id);
+  if (!h) return null;
+  return h.value ?? h.fieldValue ?? h.field_value ?? null;
+};
+const toNum = v => {
+  if (v == null) return null;
+  const n = parseFloat(String(v).replace(/[^0-9.\-]/g, ''));
+  return isNaN(n) ? null : n;
+};
 
-async function fetchAllOpportunities(locationId) {
+async function searchCustomers(locationId) {
   const out = [];
-  let page = 1;
-  // GHL caps search pages; loop defensively until empty or a sane ceiling
-  while (page <= 50) {
-    const url = `${GHL_BASE}/opportunities/search?location_id=${locationId}&limit=100&page=${page}`;
-    const res = await fetch(url, { headers: HEADERS() });
+  let searchAfter = null, guard = 0;
+  while (guard < 80) {
+    const body = {
+      locationId,
+      pageLimit: 100,
+      // pull only enrolled customers — keeps it fast on a big contact base
+      filters: [{ field: 'type', operator: 'eq', value: 'customer' }],
+    };
+    if (searchAfter) body.searchAfter = searchAfter;
+
+    const res = await fetch(`${GHL_BASE}/contacts/search`, {
+      method: 'POST', headers: H(), body: JSON.stringify(body),
+    });
     if (!res.ok) {
-      const body = await res.text();
-      throw new Error(`GHL ${res.status} on page ${page}: ${body.slice(0, 300)}`);
+      const t = await res.text();
+      throw new Error(`contacts/search ${res.status}: ${t.slice(0, 300)}`);
     }
-    const json = await res.json();
-    const batch = json.opportunities || [];
+    const j = await res.json();
+    const batch = j.contacts || [];
     out.push(...batch);
     if (batch.length < 100) break;
-    page++;
+    const last = batch[batch.length - 1];
+    searchAfter = last && last.searchAfter ? last.searchAfter : null;
+    if (!searchAfter) break;
+    guard++;
   }
   return out;
 }
 
-function mapRow(o) {
-  const created = o.createdAt ? new Date(o.createdAt).getTime() : null;
-  const enrolledRaw = cf(o, CF.enrolledDate);
+function mapContact(c) {
+  const pkg = cfv(c, CF.package) || 'Silver';
+  const enrolledRaw = cfv(c, CF.enrolledDate);
   const enrolledAt = enrolledRaw ? new Date(enrolledRaw).getTime() : null;
-  const value = Number(o.monetaryValue) || 0;
-  const collected = Number(cf(o, CF.collected)) || (o.status === 'won' ? value : 0);
+  const created = c.dateAdded ? new Date(c.dateAdded).getTime() : null;
+  const value = toNum(cfv(c, CF.packageValue)) ?? PRICE[pkg] ?? 0;
+  const collected = toNum(cfv(c, CF.moneyPaid)) ?? value;
   const cycleDays = (enrolledAt && created) ? Math.round((enrolledAt - created) / 86400000) : null;
-
-  // GHL status: open | won | lost | abandoned  →  collapse to our three
-  const status = o.status === 'won' ? 'won' : o.status === 'lost' || o.status === 'abandoned' ? 'lost' : 'open';
-
   return {
-    id: o.id,
-    name: o.name || o.contact?.name || 'Unknown',
+    id: c.id,
+    name: [c.firstName, c.lastName].filter(Boolean).join(' ') || c.email || 'Unknown',
     value,
     collected,
-    status,
-    stage: o.pipelineStageName || o.stage || 'New Lead',
-    stageIdx: 0, // resolved client-side if you pass a stage order; otherwise derive from pipelineStageName
-    package: cf(o, CF.package) || 'Silver',
-    occupation: cf(o, CF.occupation) || 'Other',
-    assignee: o.assignedToName || o.assignedTo || 'Unassigned',
-    paymentType: cf(o, CF.paymentType) || 'Full Payment',
-    visa: cf(o, CF.visa) || 'Other',
+    status: 'won',            // this version pulls customers only
+    stage: 'Enrolled',
+    stageIdx: 4,
+    package: pkg,
+    occupation: cfv(c, CF.occupation) || 'Other',
+    assignee: c.assignedTo || 'Unassigned',
+    paymentType: cfv(c, CF.paymentType) || 'Full Payment',
+    visa: cfv(c, CF.visa) || 'Other',
     createdAt: created,
     enrolledAt,
     cycleDays,
@@ -110,25 +118,24 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Missing GHL_PIT or GHL_LOCATION_ID env vars' });
   }
 
-  // serve cache if fresh
-  if (CACHE.payload && Date.now() - CACHE.at < TTL) {
-    return res.status(200).json({ ...CACHE.payload, cached: true });
-  }
-
   try {
-    const opps = await fetchAllOpportunities(process.env.GHL_LOCATION_ID);
-    const rows = opps.map(mapRow);
+    const customers = await searchCustomers(process.env.GHL_LOCATION_ID);
+    const rows = customers.map(mapContact);
 
-    // referral rows: opportunities that carry a referrer custom field would
-    // be filtered here. Left as an empty array until the referral CF id is
-    // mapped — wire it the same way as the CF block above.
-    const refs = [];
+    // small preview so visiting /api/ghl in the browser confirms the mapping
+    const sample = rows.slice(0, 3).map(r => ({
+      name: r.name, package: r.package, value: r.value,
+      collected: r.collected, occupation: r.occupation, paymentType: r.paymentType,
+    }));
 
-    const payload = { rows, refs, count: rows.length, generatedAt: new Date().toISOString() };
-    CACHE = { at: Date.now(), payload };
-    return res.status(200).json(payload);
+    return res.status(200).json({
+      rows,
+      refs: [],
+      count: rows.length,
+      debug: { mode: 'customers-only', sample },
+      generatedAt: new Date().toISOString(),
+    });
   } catch (err) {
-    console.error(err);
     return res.status(502).json({ error: String(err.message || err) });
   }
 }
