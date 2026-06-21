@@ -34,10 +34,10 @@ const HEADERS = () => ({
 
 // ---- paste the real custom-field IDs from Leo's GHL location here ----
 const CF = {
-  occupation:  'REPLACE_occupation_field_id',
-  package:     'REPLACE_package_field_id',
-  paymentType: 'REPLACE_paymentType_field_id',
-  visa:        'REPLACE_visa_subclass_field_id',
+  occupation:  yJ0uzdgON7RsoQyusUPz,
+  package:     eckVE6EuidBwXM8LhmVd,
+  paymentType: 3Rv02bGP9JeblbZffgU2,
+  visa:        bmNyZj5azN83VUGWQwS5,
   enrolledDate:'REPLACE_enrolled_date_field_id',
   collected:   'REPLACE_amount_collected_field_id', // optional
 };
