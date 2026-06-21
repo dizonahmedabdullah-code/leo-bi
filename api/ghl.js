@@ -38,7 +38,7 @@ const CF = {
   package:     eckVE6EuidBwXM8LhmVd,
   paymentType: 3Rv02bGP9JeblbZffgU2,
   visa:        bmNyZj5azN83VUGWQwS5,
-  enrolledDate:'REPLACE_enrolled_date_field_id',
+  enrolledDate:zeMCO26qq8GjBUfpF2vt,
   collected:   'REPLACE_amount_collected_field_id', // optional
 };
 
