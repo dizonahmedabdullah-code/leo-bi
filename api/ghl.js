@@ -41,6 +41,14 @@ const CF = {
 // Fill in real Gold/Diamond prices if you ever want that fallback to be exact.
 const PRICE = { Silver: 1996.50, Gold: 0, Diamond: 0 };
 
+/* ---- map GHL user IDs to readable names for the Closer chart ----
+   These two IDs came back from your live data. Confirm which is which
+   and edit the names below (left = user ID, right = display name). */
+const USER_MAP = {
+  'VAoypbyxYj8tVBFZm6pL': 'Dennis',   // <-- CONFIRM: Leo or Dennis?
+  '0HG2fXecJOsjzonXIXfJ': 'Leo',      // <-- CONFIRM: Leo or Dennis?
+};
+
 const cfv = (c, id) => {
   const arr = c.customFields || c.customField || [];
   const h = arr.find(f => f.id === id);
@@ -102,7 +110,7 @@ function mapContact(c) {
     stageIdx: 4,
     package: pkg,
     occupation: cfv(c, CF.occupation) || 'Other',
-    assignee: c.assignedTo || 'Unassigned',
+    assignee: USER_MAP[c.assignedTo] || c.assignedTo || 'Unassigned',
     paymentType: cfv(c, CF.paymentType) || 'Full Payment',
     visa: cfv(c, CF.visa) || 'Other',
     createdAt: created,
@@ -120,7 +128,7 @@ export default async function handler(req, res) {
 
   try {
     const customers = await searchCustomers(process.env.GHL_LOCATION_ID);
-    const rows = customers.map(mapContact);
+    const rows = customers.map(mapContact).filter(r => !/^\(example\)/i.test(r.name));
 
     // small preview so visiting /api/ghl in the browser confirms the mapping
     const sample = rows.slice(0, 3).map(r => ({
