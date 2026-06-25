@@ -272,7 +272,7 @@
    When false, the dashboard runs on generated demo data so it previews
    instantly the moment it's dropped on Netlify/Vercel.
 ==================================================================== */
-const USE_LIVE = true;            // <-- single switch: demo  ->  live
+const USE_LIVE = true;             // <-- single switch: demo  ->  live
 const API_ENDPOINT = '/api/ghl';   // serverless proxy that holds the token
 
 const PACKAGES = [
@@ -284,7 +284,7 @@ const OCCUPATIONS = ['Engineering','IT / Software','Accounting','Nursing','Healt
 const ASSIGNEES   = ['Leo','Dennis'];
 const PAYTYPES    = ['Full Payment','Installment'];
 const VISA        = ['485','482','500','189','190','Other'];
-const STAGES      = ['New Lead','Consultation Booked','Consultation Done','Closing Booked','Enrolled'];
+const STAGES      = ['New Lead','Engaged','Consultation Booked','Purchased'];
 
 /* ---- DEMO DATA GENERATOR ---- */
 function rand(a){ return a[Math.floor(Math.random()*a.length)]; }
@@ -577,7 +577,7 @@ function renderFunnel(){
   const f=rowsInDateRange().filter(r=>{ for(const k of['package','occupation','assignee','paymentType','visa']){ if(filters[k].size&&!filters[k].has(r[k]))return false; } return true; });
   const stageCounts=STAGES.map((s,idx)=> f.filter(r=>r.stageIdx>=idx).length );
   const top=stageCounts[0]||1;
-  const cols=['#4D9FFF','#4D9FFF','#FFB800','#FFB800','#00D97E'];
+  const cols=['#4D9FFF','#7B8FFF','#FFB800','#00D97E'];
   document.getElementById('funnel').innerHTML = STAGES.map((s,i)=>{
     const pct= top? (stageCounts[i]/top*100):0;
     const conv= i>0 && stageCounts[i-1]? Math.round(stageCounts[i]/stageCounts[i-1]*100):100;
