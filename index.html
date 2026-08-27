@@ -198,7 +198,7 @@
 
 <!-- CHARTS -->
 <div class="grid">
-  <div class="card span8">
+  <div class="card span8" style="display:none">
     <div class="card-head">
       <div><div class="card-title">Revenue Trend</div><div class="card-meta" id="trendMeta">—</div></div>
       <div class="card-tools" id="trendGran">
@@ -454,7 +454,9 @@ function renderKPIs(){
     {c:'c-money', label:'Revenue (Won)', val:fmtMoney(revenue), sub:`${won.length} enrolments`},
     {c:'c-blue',  label:'Cash Collected', val:fmtMoney(collected), sub:`${revenue?Math.round(collected/revenue*100):0}% of booked`},
     {c:'c-amber', label:'Conversion', val:conv.toFixed(1), u:'%', sub:`${won.length} of ${leads} leads`},
-    {c:'c-purple',label:'Avg Sales Cycle', val:avgCycle, u:'days', sub:'lead → enrolled'},
+    // PARKED: Enrolled Date is blank on opportunity records, so cycleDays
+    // computes negative. Restore once Enrolled Date syncs Contact -> Opportunity.
+    // {c:'c-purple',label:'Avg Sales Cycle', val:avgCycle, u:'days', sub:'lead → enrolled'},
     {c:'c-urgent',label:'Active Pipeline', val:fmt(f.filter(r=>r.status==='open').length), u:'open', sub:'in progress'},
   ];
   document.getElementById('kpis').innerHTML = cards.map(k=>`
