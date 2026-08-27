@@ -18,7 +18,9 @@
 ===================================================================== */
 
 const GHL_BASE = 'https://services.leadconnectorhq.com';
-const PIPELINE_NAME = 'Leo Le Education Leads';
+const PIPELINE_ID = '6MlIEbSN1rvxIjOoYGSS';
+const WON_STAGE  = 'Purchased';
+const LOST_STAGE = 'Lost / Not Qualified';
 
 const H = () => ({
   Authorization: `Bearer ${process.env.GHL_PIT}`,
@@ -51,14 +53,14 @@ const STAGE_IDX = {
   'New Lead': 0,
   'Engaged': 1,
   'Consultation Booked': 2,
-  'Purchased': 3,
-  'Cancelled': 3,
+  'Consultation Done': 3,
+  'Purchased': 4,
+  'Lost / Not Qualified': 0,
 };
 
-const mapStatus = s => {
-  const v = String(s || '').toLowerCase();
-  if (v === 'won') return 'won';
-  if (v === 'lost' || v === 'abandoned') return 'lost';
+const mapStatus = stageName => {
+  if (stageName === WON_STAGE) return 'won';
+  if (stageName === LOST_STAGE) return 'lost';
   return 'open';
 };
 
@@ -80,8 +82,8 @@ async function getLeadsPipeline(loc) {
   const res = await fetch(`${GHL_BASE}/opportunities/pipelines?locationId=${loc}`, { headers: H() });
   if (!res.ok) throw new Error(`pipelines ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const j = await res.json();
-  const pipe = (j.pipelines || []).find(p => p.name === PIPELINE_NAME);
-  if (!pipe) throw new Error(`Pipeline "${PIPELINE_NAME}" not found`);
+  const pipe = (j.pipelines || []).find(p => p.id === PIPELINE_ID);
+  if (!pipe) throw new Error(`Pipeline id "${PIPELINE_ID}" not found`);
   const stageMap = {};
   (pipe.stages || []).forEach(s => { stageMap[s.id] = s.name; });
   return { id: pipe.id, stageMap };
@@ -150,7 +152,7 @@ export default async function handler(req, res) {
     const rows = opps.map(o => {
       const stageName = stageMap[o.pipelineStageId] || 'New Lead';
       const stageIdx = STAGE_IDX[stageName] ?? 0;
-      const status = mapStatus(o.status);
+      const status = mapStatus(stageName);
       const contactId = o.contactId || (o.contact && o.contact.id) || null;
       const created = ts(o.createdAt);
       const value = toNum(o.monetaryValue) ?? 0;
